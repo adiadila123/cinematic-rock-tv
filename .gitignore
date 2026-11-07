@@ -1,0 +1,15 @@
+# Dependencies and builds
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment and deploy config
+.env*
+.vercel/
+
+# Editor, OS and local tooling
+.DS_Store
+.idea/
+.impeccable/
+npm-debug.log*

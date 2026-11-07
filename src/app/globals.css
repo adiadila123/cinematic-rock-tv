@@ -1,0 +1,353 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-void: #060608;
+    --bg-obsidian: #0a0a0e;
+    --bg-truss: #111115;
+    --bg-gunmetal: #18181f;
+    --border-steel: #262630;
+    --accent-crimson: #dc143c;
+    --accent-tungsten: #ff6200;
+    --text-chalk: #f6f5f2;
+    --text-bone: #d6d3cd;
+    --text-ash: #b5b0a8;
+
+    /* Liquid Glass material */
+    --glass-blur: 22px;
+    --glass-saturate: 185%;
+    --glass-tint: rgba(22, 22, 29, 0.42);
+    --glass-tint-thick: rgba(14, 14, 19, 0.68);
+    --glass-tint-thin: rgba(30, 30, 38, 0.22);
+    --glass-rim: rgba(255, 255, 255, 0.26);
+    --glass-rim-soft: rgba(255, 255, 255, 0.07);
+    --glass-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    color-scheme: dark;
+  }
+
+  html {
+    background-color: var(--bg-void);
+    color: var(--text-chalk);
+    scroll-behavior: smooth;
+    scroll-padding-top: 96px;
+    caret-color: var(--accent-tungsten);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(220, 20, 60, 0.7) transparent;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* `.force-motion` = the visitor turned animations back on from the site prompt */
+  @media (prefers-reduced-motion: reduce) {
+    html:not(.force-motion) {
+      scroll-behavior: auto;
+    }
+    html:not(.force-motion) *,
+    html:not(.force-motion) *::before,
+    html:not(.force-motion) *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  body {
+    background-color: var(--bg-void);
+    color: var(--text-chalk);
+    font-family: "Archivo", sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: var(--accent-crimson);
+    color: var(--text-chalk);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(220, 20, 60, 0.7);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-tungsten);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-tungsten);
+    outline-offset: 3px;
+  }
+
+  a {
+    text-underline-offset: 4px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+}
+
+@layer components {
+  /*
+   * Liquid Glass — translucent material that blurs, saturates and (in
+   * Chromium) refracts what is behind it, with a specular rim that catches
+   * light from above and a highlight that follows the pointer.
+   */
+  .glass {
+    position: relative;
+    isolation: isolate;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.015) 46%, rgba(255, 255, 255, 0.03) 100%),
+      var(--glass-tint);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-rim),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.05),
+      inset 0 0 0 1px var(--glass-rim-soft),
+      inset 0 -18px 32px -24px rgba(255, 255, 255, 0.08),
+      0 22px 56px -20px rgba(0, 0, 0, 0.78);
+  }
+
+  /* Directional rim: brighter top-left, fading through the body */
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.5) 0%,
+      rgba(255, 255, 255, 0.08) 28%,
+      rgba(255, 255, 255, 0) 55%,
+      rgba(255, 255, 255, 0.14) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Pointer-following specular highlight */
+  .glass::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      220px circle at var(--mx, 50%) var(--my, -30%),
+      rgba(255, 255, 255, 0.13),
+      transparent 65%
+    );
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .glass:hover::after {
+      opacity: 1;
+    }
+  }
+
+  /* Without backdrop blur, translucent glass hurts legibility: go denser */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      --glass-tint: rgba(16, 16, 21, 0.9);
+    }
+  }
+
+  .glass-thick {
+    --glass-tint: var(--glass-tint-thick);
+    --glass-blur: 28px;
+  }
+
+  .glass-thin {
+    --glass-tint: var(--glass-tint-thin);
+    --glass-blur: 16px;
+  }
+
+  .glass-tint-crimson {
+    --glass-tint: rgba(220, 20, 60, 0.72);
+    --glass-rim: rgba(255, 210, 220, 0.55);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-rim),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      inset 0 -14px 24px -16px rgba(255, 255, 255, 0.18),
+      0 18px 44px -14px rgba(220, 20, 60, 0.55);
+  }
+
+  .glass-tint-tungsten {
+    --glass-tint: rgba(255, 98, 0, 0.78);
+    --glass-rim: rgba(255, 225, 200, 0.6);
+  }
+
+  /* Gel-like press response */
+  .glass-press {
+    transition:
+      transform 0.45s var(--glass-spring),
+      background-color 0.2s ease,
+      box-shadow 0.3s ease,
+      filter 0.2s ease;
+    will-change: transform;
+  }
+  .glass-press:hover {
+    filter: brightness(1.12);
+  }
+  .glass-press:active {
+    transform: scale(0.955);
+    transition-duration: 0.12s;
+  }
+
+  /* Refraction is Chromium-only; enabled from LiquidGlassDefs */
+  .lg-refract .glass-refract {
+    -webkit-backdrop-filter: url(#lg-refraction) blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: url(#lg-refraction) blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+
+  /* Hairline divider inside glass */
+  .glass-divider {
+    border-color: rgba(255, 255, 255, 0.09);
+  }
+
+  /* Ambient stage lighting behind every glass surface */
+  .ambient-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+      radial-gradient(120% 80% at 50% 120%, rgba(140, 11, 37, 0.25), transparent 60%),
+      var(--bg-void);
+  }
+  .ambient-stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(rgba(246, 245, 242, 0.035) 1px, transparent 0),
+      radial-gradient(rgba(220, 20, 60, 0.025) 1px, transparent 0);
+    background-size: 24px 24px;
+    background-position: 0 0, 12px 12px;
+  }
+  .ambient-orb {
+    position: absolute;
+    border-radius: 9999px;
+    will-change: transform;
+    animation: ambient-drift 28s ease-in-out infinite alternate;
+  }
+  .ambient-orb--crimson {
+    width: 70vmax;
+    height: 70vmax;
+    left: -20vmax;
+    top: -18vmax;
+    background: radial-gradient(circle, rgba(220, 20, 60, 0.3) 0%, rgba(220, 20, 60, 0) 62%);
+  }
+  .ambient-orb--tungsten {
+    width: 55vmax;
+    height: 55vmax;
+    right: -18vmax;
+    top: 30vh;
+    background: radial-gradient(circle, rgba(255, 98, 0, 0.17) 0%, rgba(255, 98, 0, 0) 62%);
+    animation-duration: 34s;
+    animation-delay: -9s;
+  }
+  .ambient-orb--deep {
+    width: 60vmax;
+    height: 60vmax;
+    left: 20vw;
+    bottom: -35vmax;
+    background: radial-gradient(circle, rgba(140, 11, 37, 0.35) 0%, rgba(140, 11, 37, 0) 62%);
+    animation-duration: 40s;
+    animation-delay: -18s;
+  }
+
+  @keyframes ambient-drift {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(6vw, 4vh, 0) scale(1.08);
+    }
+    100% {
+      transform: translate3d(-4vw, -3vh, 0) scale(0.96);
+    }
+  }
+}
+
+/* Subtle 35mm concert film grain overlay */
+.stage-film-grain {
+  background-image: radial-gradient(rgba(246, 245, 242, 0.035) 1px, transparent 0),
+    radial-gradient(rgba(220, 20, 60, 0.025) 1px, transparent 0);
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+}
+
+.tabular-data {
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Keep page content clear of the floating iOS-style tab bar */
+@media (max-width: 767px) {
+  .pb-tabbar {
+    padding-bottom: calc(108px + var(--safe-bottom));
+  }
+}
+
+/*
+ * Lite mode (html.lite): set by ExperienceProvider when the device lacks
+ * backdrop blur or GPU acceleration. Same layout and palette, but glass
+ * becomes a dense tinted surface and the ambient light stops drifting.
+ */
+.lite .glass {
+  --glass-tint: rgba(18, 18, 24, 0.94);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.lite .glass-thin {
+  --glass-tint: rgba(18, 18, 24, 0.82);
+}
+.lite .glass-tint-crimson {
+  --glass-tint: #c0123a;
+}
+.lite .glass-tint-tungsten {
+  --glass-tint: #e85a00;
+}
+.lite .glass::after {
+  display: none;
+}
+.lite .ambient-orb {
+  animation: none;
+}
+.lite .backdrop-blur-md,
+.lite .backdrop-blur-xl {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
