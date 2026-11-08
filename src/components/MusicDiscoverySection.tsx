@@ -8,6 +8,7 @@ import { ROCK_GENRES, RockGenreDestination, genrePlaylistId } from "@/data/rockT
 import { youtubeThumb } from "@/lib/site";
 import { useLocale } from "@/context/LocaleContext";
 import { useMedia } from "@/context/MediaContext";
+import { lockPageScroll } from "@/lib/scrollLock";
 import { scrollToSection } from "@/lib/sections";
 import { StickySectionBar } from "@/components/scroll/StickySectionBar";
 import { GenreLegends } from "@/components/discover/GenreLegends";
@@ -443,11 +444,7 @@ export function MusicDiscoverySection() {
   // The page underneath stays put while the full-screen details are open
   useEffect(() => {
     if (!sheetOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
+    return lockPageScroll();
   }, [sheetOpen]);
 
   // Arrow keys walk the tree in time order, as the WAI-ARIA tabs pattern expects

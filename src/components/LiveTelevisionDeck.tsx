@@ -20,6 +20,7 @@ import {
 import { STREAM_SOURCE_URL } from "@/data/rockTvData";
 import { useLocale } from "@/context/LocaleContext";
 import { useMedia } from "@/context/MediaContext";
+import { lockPageScroll } from "@/lib/scrollLock";
 
 type DeckMode = "embed" | "fallback";
 type StageWashMode = "crimson" | "tungsten" | "blackout";
@@ -167,12 +168,11 @@ export function LiveTelevisionDeck() {
   // Pseudo fullscreen: freeze the page behind and let Escape close it
   useEffect(() => {
     if (!pseudoFullscreen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPseudoFullscreen(false);
     window.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = previous;
+      unlockScroll();
       window.removeEventListener("keydown", onKey);
     };
   }, [pseudoFullscreen]);

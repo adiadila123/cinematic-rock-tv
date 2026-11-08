@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, X, Radio, AlertCircle } from "
 import { GENRE_PLAYLISTS, LEGEND_PLAYLISTS } from "@/data/rockTvData";
 import { useLocale } from "@/context/LocaleContext";
 import { useMedia } from "@/context/MediaContext";
+import { lockPageScroll } from "@/lib/scrollLock";
 import { youtubeEmbed, youtubeThumb, youtubeWatch } from "@/lib/site";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])';
@@ -91,12 +92,11 @@ export function LegendVideoModal() {
   useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     const id = window.setTimeout(() => closeRef.current?.focus(), 50);
     return () => {
       window.clearTimeout(id);
-      document.body.style.overflow = overflow;
+      unlockScroll();
       returnFocusRef.current?.focus?.();
     };
   }, [open]);
