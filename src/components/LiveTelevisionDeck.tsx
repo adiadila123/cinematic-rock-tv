@@ -25,6 +25,14 @@ type DeckMode = "embed" | "fallback";
 type StageWashMode = "crimson" | "tungsten" | "blackout";
 type DeckStatus = "waiting" | "connecting" | "ready" | "standby" | "fallback";
 
+/** Prefixed Fullscreen API (Safari on iPad) and orientation lock (Android), absent from the DOM typings. */
+type WebkitDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void>;
+};
+type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
+type LockableOrientation = ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void };
+
 export function LiveTelevisionDeck() {
   const { dict } = useLocale();
   const t = dict.live;
@@ -35,6 +43,10 @@ export function LiveTelevisionDeck() {
   const [hasEnteredView, setHasEnteredView] = useState(false);
   const [iframeKey, setIframeKey] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // iPhone Safari can't put a page element in fullscreen; the player then fills
+  // the viewport itself ("pseudo" fullscreen) instead.
+  const [pseudoFullscreen, setPseudoFullscreen] = useState(false);
+  const fullscreenOn = isFullscreen || pseudoFullscreen;
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [stageWash, setStageWash] = useState<StageWashMode>("crimson");
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -51,44 +63,119 @@ export function LiveTelevisionDeck() {
   const status: DeckStatus = !hasEnteredView
     ? "waiting"
     : deckMode === "fallback"
-    ? "fallback"
-    : !liveOn
-    ? "standby"
-    : connecting
-    ? "connecting"
-    : "ready";
+      ? "fallback"
+      : !liveOn
+        ? "standby"
+        : connecting
+          ? "connecting"
+          : "ready";
 
   // Mount the iframe only once the player is on screen, and stop it
-  // (unmount = no audio, no bandwidth) as soon as the viewer scrolls past it.
+  // (unmount = no audio, no bandwidth) once the viewer has really scrolled past it.
+  // Leaving view is only trusted after a short wait, and never while the video is
+  // fullscreen or the phone is rotating: rotating out of the video's own fullscreen
+  // briefly re-lays out the page, which must not count as scrolling away.
+  const inViewRef = useRef(false);
+  const lastResizeRef = useRef(0);
+  const pseudoFullscreenRef = useRef(false);
+  pseudoFullscreenRef.current = pseudoFullscreen;
+
   useEffect(() => {
     const el = playerStageRef.current;
     if (!el) return;
+    let timer = 0;
+    const inFullscreen = () =>
+      Boolean(document.fullscreenElement || (document as WebkitDocument).webkitFullscreenElement) ||
+      pseudoFullscreenRef.current;
+
+    const confirmLeave = () => {
+      if (inViewRef.current) return;
+      if (inFullscreen() || performance.now() - lastResizeRef.current < 1500) {
+        timer = window.setTimeout(confirmLeave, 1000);
+        return;
+      }
+      pauseLive("scroll");
+    };
 
     const observer = new IntersectionObserver(
       ([entry]) => {
+        inViewRef.current = entry.isIntersecting;
+        window.clearTimeout(timer);
         if (entry.isIntersecting) {
           setHasEnteredView(true);
           return;
         }
-        if (!document.fullscreenElement) pauseLive("scroll");
+        timer = window.setTimeout(confirmLeave, 900);
       },
-      { threshold: 0 }
+      { threshold: 0 },
     );
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timer);
+    };
   }, [pauseLive]);
+
+  // After a rotation, bring the player back if it was on screen before it:
+  // iOS can leave the page scrolled elsewhere (often the top) when the
+  // video's own fullscreen closes.
+  useEffect(() => {
+    let wasInView: boolean | null = null;
+    let settle = 0;
+    const onResize = () => {
+      lastResizeRef.current = performance.now();
+      if (wasInView === null) wasInView = inViewRef.current;
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        const el = playerStageRef.current;
+        if (wasInView && el && !pseudoFullscreenRef.current && !document.fullscreenElement) {
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom < 0 || rect.top > window.innerHeight) el.scrollIntoView({ block: "center" });
+        }
+        wasInView = null;
+      }, 450);
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+      window.clearTimeout(settle);
+    };
+  }, []);
 
   useEffect(() => {
     setConnectionTimestamp(
-      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
     );
   }, [iframeKey, status]);
 
   useEffect(() => {
-    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const onFullscreenChange = () => {
+      const el = document.fullscreenElement || (document as WebkitDocument).webkitFullscreenElement;
+      setIsFullscreen(el === playerStageRef.current);
+      if (!el) (screen.orientation as LockableOrientation | undefined)?.unlock?.();
+    };
     document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
   }, []);
+
+  // Pseudo fullscreen: freeze the page behind and let Escape close it
+  useEffect(() => {
+    if (!pseudoFullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPseudoFullscreen(false);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pseudoFullscreen]);
 
   // Cross-origin onLoad can fire early or not at all; never stay stuck connecting.
   useEffect(() => {
@@ -114,13 +201,29 @@ export function LiveTelevisionDeck() {
   };
 
   const handleToggleFullscreen = async () => {
-    if (!playerStageRef.current) return;
-    try {
-      if (!document.fullscreenElement) await playerStageRef.current.requestFullscreen();
-      else await document.exitFullscreen();
-    } catch {
-      setIsTheaterMode((prev) => !prev);
+    const el = playerStageRef.current as WebkitElement | null;
+    if (!el) return;
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false);
+      return;
     }
+    const doc = document as WebkitDocument;
+    if (document.fullscreenElement || doc.webkitFullscreenElement) {
+      await (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+      return;
+    }
+    const request = el.requestFullscreen ?? el.webkitRequestFullscreen;
+    if (request) {
+      try {
+        await request.call(el);
+        // Android can turn the screen sideways for the video; elsewhere this just fails quietly
+        await (screen.orientation as LockableOrientation | undefined)?.lock?.("landscape").catch(() => {});
+        return;
+      } catch {
+        // fall through to pseudo fullscreen
+      }
+    }
+    setPseudoFullscreen(true);
   };
 
   const handleCopyStreamUrl = async () => {
@@ -137,15 +240,15 @@ export function LiveTelevisionDeck() {
     stageWash === "crimson"
       ? "0 40px 110px -24px rgba(220, 20, 60, 0.45), 0 24px 64px -16px rgba(0, 0, 0, 0.9)"
       : stageWash === "tungsten"
-      ? "0 40px 110px -24px rgba(255, 98, 0, 0.38), 0 24px 64px -16px rgba(0, 0, 0, 0.9)"
-      : "0 28px 70px -12px rgba(0, 0, 0, 0.96)";
+        ? "0 40px 110px -24px rgba(255, 98, 0, 0.38), 0 24px 64px -16px rgba(0, 0, 0, 0.9)"
+        : "0 28px 70px -12px rgba(0, 0, 0, 0.96)";
 
   const standbyReason =
     livePauseReason === "scroll"
       ? t.standbyReasonScroll
       : livePauseReason === "modal"
-      ? t.standbyReasonModal
-      : t.standbyReasonManual;
+        ? t.standbyReasonModal
+        : t.standbyReasonManual;
 
   const statusLabel = {
     waiting: t.statusWaiting,
@@ -155,8 +258,7 @@ export function LiveTelevisionDeck() {
     fallback: t.statusFallback,
   }[status];
 
-  const lampClass =
-    status === "ready" ? "bg-crimson" : status === "connecting" ? "bg-tungsten" : "bg-ash";
+  const lampClass = status === "ready" ? "bg-crimson" : status === "connecting" ? "bg-tungsten" : "bg-ash";
 
   const washes: { id: StageWashMode; label: string; active: string }[] = [
     { id: "crimson", label: t.washCrimson, active: "bg-crimson text-chalk" },
@@ -170,9 +272,9 @@ export function LiveTelevisionDeck() {
   return (
     <section id="live-tv" aria-labelledby="live-tv-heading" className="relative py-20 sm:py-28">
       <div
-        className={`relative z-10 mx-auto w-full px-4 transition-all duration-300 sm:px-8 lg:px-12 ${
+        className={`relative mx-auto w-full px-4 transition-all duration-300 sm:px-8 lg:px-12 ${
           isTheaterMode ? "max-w-[1680px]" : "max-w-[1440px]"
-        }`}
+        } ${pseudoFullscreen ? "z-[90]" : "z-10"}`}
       >
         <div className="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div>
@@ -186,9 +288,15 @@ export function LiveTelevisionDeck() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-end">
-            <div role="status" aria-live="polite" className="glass inline-flex items-center gap-2.5 rounded-full px-4 py-2.5">
+            <div
+              role="status"
+              aria-live="polite"
+              className="glass inline-flex items-center gap-2.5 rounded-full px-4 py-2.5"
+            >
               <span className={`h-2.5 w-2.5 rounded-full ${lampClass}`} aria-hidden="true" />
-              <span className="font-condensed text-sm font-bold uppercase tracking-wider text-chalk">{statusLabel}</span>
+              <span className="font-condensed text-sm font-bold uppercase tracking-wider text-chalk">
+                {statusLabel}
+              </span>
             </div>
             <div className="glass glass-thin rounded-full px-3.5 py-2.5 font-mono text-xs text-bone tabular-data">
               {t.sync}: {connectionTimestamp}
@@ -199,21 +307,31 @@ export function LiveTelevisionDeck() {
         {/* Player frame */}
         <div
           ref={playerStageRef}
-          style={{ boxShadow: washShadow, borderRadius: isFullscreen ? 0 : 28 }}
-          className="glass glass-thick relative flex flex-col gap-2 p-2 transition-shadow duration-500"
+          style={{ boxShadow: washShadow, borderRadius: fullscreenOn ? 0 : 28 }}
+          className={`glass glass-thick flex flex-col gap-2 p-2 transition-shadow duration-500 ${
+            fullscreenOn
+              ? "justify-center bg-[#050507] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))]"
+              : ""
+          } ${pseudoFullscreen ? "fixed inset-0 z-[90]" : "relative"}`}
         >
           {/* Top bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 sm:px-4">
             <div className="flex items-center gap-3">
               <Tv className="h-4 w-4 text-crimson" aria-hidden="true" />
-              <span className="font-condensed text-base font-bold uppercase tracking-wider text-chalk">{t.monitor}</span>
+              <span className="font-condensed text-base font-bold uppercase tracking-wider text-chalk">
+                {t.monitor}
+              </span>
               <span className="hidden rounded-full bg-white/[0.06] px-2.5 py-0.5 font-mono text-[11px] text-bone tabular-data sm:inline-block">
                 {t.hdBadge}
               </span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div role="group" aria-label={t.washGroup} className="hidden items-center gap-0.5 rounded-full bg-white/[0.05] p-1 sm:flex">
+              <div
+                role="group"
+                aria-label={t.washGroup}
+                className="hidden items-center gap-0.5 rounded-full bg-white/[0.05] p-1 sm:flex"
+              >
                 {washes.map((w) => (
                   <button
                     key={w.id}
@@ -244,18 +362,23 @@ export function LiveTelevisionDeck() {
                 onClick={handleToggleFullscreen}
                 className="glass glass-thin glass-press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-condensed text-xs font-bold uppercase tracking-wider text-chalk"
               >
-                {isFullscreen ? (
+                {fullscreenOn ? (
                   <Minimize2 className="h-3.5 w-3.5 text-crimson" aria-hidden="true" />
                 ) : (
                   <Maximize2 className="h-3.5 w-3.5 text-crimson" aria-hidden="true" />
                 )}
-                <span>{isFullscreen ? t.exitFullscreen : t.fullscreen}</span>
+                <span>{fullscreenOn ? t.exitFullscreen : t.fullscreen}</span>
               </button>
             </div>
           </div>
 
           {/* 16:9 viewport */}
-          <div className="relative aspect-video w-full overflow-hidden rounded-glass-sm bg-void shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+          <div
+            style={fullscreenOn ? { width: "min(100%, calc((100dvh - 72px) * 16 / 9))" } : undefined}
+            className={`relative mx-auto aspect-video shrink-0 overflow-hidden rounded-glass-sm bg-void shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] ${
+              fullscreenOn ? "" : "w-full"
+            }`}
+          >
             {iframeMounted && (
               <iframe
                 key={iframeKey}
@@ -364,7 +487,11 @@ export function LiveTelevisionDeck() {
           </div>
 
           {/* Bottom console */}
-          <div className="flex flex-col justify-between gap-3 px-2 py-2 sm:px-3 lg:flex-row lg:items-center">
+          <div
+            className={`flex-col justify-between gap-3 px-2 py-2 sm:px-3 lg:flex-row lg:items-center ${
+              fullscreenOn ? "hidden" : "flex"
+            }`}
+          >
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 type="button"
@@ -380,7 +507,12 @@ export function LiveTelevisionDeck() {
                 <span>{liveOn ? t.standbyButton : t.powerOn}</span>
               </button>
 
-              <button type="button" onClick={reconnect} disabled={!iframeMounted} className={`${secondaryBtn} disabled:opacity-50`}>
+              <button
+                type="button"
+                onClick={reconnect}
+                disabled={!iframeMounted}
+                className={`${secondaryBtn} disabled:opacity-50`}
+              >
                 <RotateCw className="h-4 w-4 text-crimson" aria-hidden="true" />
                 <span>{t.resync}</span>
               </button>
